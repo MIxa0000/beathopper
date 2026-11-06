@@ -1,0 +1,30 @@
+{
+ "id": "./",
+ "name": "Beat Hopper",
+ "short_name": "Beat Hopper",
+ "description": "Ритм-игра по твоей песне",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "landscape",
+ "background_color": "#0d0b1e",
+ "theme_color": "#0d0b1e",
+ "lang": "ru",
+ "categories": [
+  "games"
+ ],
+ "icons": [
+  {
+   "src": "icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "any maskable"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any maskable"
+  }
+ ]
+}
