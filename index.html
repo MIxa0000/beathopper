@@ -44,6 +44,9 @@ p{margin:6px 0 14px;opacity:.8;font-size:14px;line-height:1.4}
 .trs{margin:-2px 0 8px 12px;font-size:12px}.trs div{display:flex;align-items:center;gap:6px;padding:3px 0}
 .trs span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.85}
 .trs button{background:none;border:0;color:#fff;opacity:.7;font-size:15px;cursor:pointer;padding:2px 6px}
+input{user-select:text;-webkit-user-select:text}
+#rni{width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid #ffffff44;background:#ffffff12;color:var(--fg);font-size:16px;margin-bottom:12px}
+.tbar{display:flex;gap:8px;margin:2px 0 8px}.tbar button{flex:1;border:1px solid #ffffff33;background:#ffffff10;color:var(--fg);border-radius:8px;padding:8px 4px;font-size:12px;cursor:pointer}.tbar button.on{background:var(--ac);border-color:var(--ac);color:#fff}
 </style></head><body>
 <canvas id="c"></canvas>
 
@@ -57,6 +60,7 @@ p{margin:6px 0 14px;opacity:.8;font-size:14px;line-height:1.4}
 </div></div>
 <div class="ovl" id="pz"><div class="card"><h1>Пауза</h1><div class="vr">🔊 <input type="range" id="vol" min="0" max="1" step="0.01"></div><button class="go" id="pr">▶ Продолжить</button><br><br><button class="go" id="pa" style="background:#ffffff18;color:#fff">↻ Заново</button><br><br><button class="go" id="pm" style="background:#ffffff18;color:#fff">☰ В меню</button></div></div>
 <div class="ovl" id="cf" style="z-index:8"><div class="card"><p id="cft" style="font-size:16px;opacity:1;margin:0 0 14px"></p><button class="go" id="cfy">Удалить</button><br><br><button class="go" id="cfn" style="background:#ffffff18;color:#fff">Отмена</button></div></div>
+<div class="ovl" id="rn" style="z-index:9"><div class="card"><p style="font-size:16px;opacity:1;margin:0 0 10px">Новое название</p><input id="rni" type="text" maxlength="40" autocomplete="off"><button class="go" id="rny">Сохранить</button><br><br><button class="go" id="rnn" style="background:#ffffff18;color:#fff">Отмена</button></div></div>
 <script>
 const $=id=>document.getElementById(id);
 const cv=$('c'),g=cv.getContext('2d');let W,H,dpr;
@@ -69,7 +73,16 @@ let buf=null,diff=1,P=[],state='menu',src=null,an=null,fd=null,score=0,combo=0,m
 try{const d=localStorage.getItem('bh_diff');if(d!==null)diff=Math.max(0,Math.min(3,+d||0))}catch(e){}
 const GAPS=[.4,.28,.2,.2],SENS=[1.5,1.3,1.15,1.15];
 let amode=false;try{amode=localStorage.getItem('bh_amode')==='1'}catch(e){}
-let addTo=null;
+let fx=0,fxPrev=0,flashW=0,SHUF={};try{SHUF=JSON.parse(localStorage.getItem('bh_shuf')||'{}')}catch(e){}
+const saveShuf=()=>{try{localStorage.setItem('bh_shuf',JSON.stringify(SHUF))}catch(e){}};
+const shuffle=a=>{const r=a.slice();for(let i=r.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[r[i],r[j]]=[r[j],r[i]]}return r};
+let addTo=null,oneLane=false,albLabel={},NAMES={};try{NAMES=JSON.parse(localStorage.getItem('bh_names')||'{}')}catch(e){}
+const saveNames=()=>{try{localStorage.setItem('bh_names',JSON.stringify(NAMES))}catch(e){}};
+const isSecret=n=>String(n||'').trim().replace(/^["“”«»]+|["“”«»]+$/g,'')==='/₽+6@*91';
+function mkLabels(all){const m={};let k=0;all.filter(r=>r.album).sort((a,b)=>a.added-b.added).forEach(r=>{m[r.id]=NAMES['a'+r.id]||('Альбом '+(++k))});return m}
+const dispName=r=>r.album?(albLabel[r.id]||'Альбом'):(NAMES['s'+r.id]||r.name);
+const nameKey=r=>(r.album?'a':'s')+r.id;
+const rawName=r=>NAMES[nameKey(r)]||(r.album?'':r.name);
 let NL=3,curId=null,curRec=null,spd=1,accelUntil=0,bannerTxt='УСКОРЕНИЕ',crowned=false,rbH=0,alb=null,albFirst=null,missTot=0;
 const isAud=f=>/^audio\//.test(f.type)||/\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|wma)$/i.test(f.name);
 const remember=id=>{try{localStorage.setItem('bh_last',String(id))}catch(e){}};
@@ -89,22 +102,31 @@ const dbAll=()=>tx('readonly',s=>s.getAll()),dbGet=id=>tx('readonly',s=>s.get(id
 const abest=id=>{try{return(JSON.parse(localStorage.getItem('bh_alb')||'{}')[id]||{})[diff]||null}catch(e){return null}};
 const abestSet=(id,df,n,sc)=>{try{const m=JSON.parse(localStorage.getItem('bh_alb')||'{}');m[id]=m[id]||{};const o=m[id][df]||{n:0,s:0};m[id][df]={n:Math.max(o.n,n),s:Math.max(o.s,sc)};localStorage.setItem('bh_alb',JSON.stringify(m))}catch(e){}};
 async function refresh(){
-  const all=(await dbAll())||[],el=$('lib');if(!el)return;curRec=all.find(r=>r.id===curId)||curRec;
+  const all=(await dbAll())||[],el=$('lib');if(!el)return;curRec=all.find(r=>r.id===curId)||curRec;albLabel=mkLabels(all);
   const L=all.filter(r=>amode?r.album:(!r.album&&!r.video));
   el.innerHTML=L.length?'<div class="lh">'+(amode?'Мои альбомы':'Мои песни')+'</div>':'';
   L.sort((a,b)=>b.added-a.added).forEach(r=>{const d=document.createElement('div');d.className='song'+(r.id===curId?' sel':'');let h;
     if(r.album){const mb=r.tracks.reduce((q,t)=>q+t.size,0)/1048576,ab=abest(r.id);
-      h='<span class="nm">💿 '+esc(r.name)+'<small>'+r.tracks.length+' песен · '+mb.toFixed(1)+' МБ'+(ab?' · лучший: '+ab.n+'/'+r.tracks.length:'')+'</small><small>'+esc(r.tracks.map(t=>t.name.replace(/\.[^.]+$/,'')).join(', '))+'</small></span>'}
+      h='<span class="nm">💿 '+esc(dispName(r))+'<small>'+r.tracks.length+' песен · '+mb.toFixed(1)+' МБ'+(ab?' · лучший: '+ab.n+'/'+r.tracks.length:'')+'</small><small>'+esc(r.tracks.map(t=>t.name.replace(/\.[^.]+$/,'')).join(', '))+'</small></span>'}
     else{const cl=(r.clears&&r.clears[diff])||0,bst=(r.best&&r.best[diff]?' · рекорд '+r.best[diff]:'')+(((r.bs&&r.bs[diff])||0)>1?' · скорость ×'+r.bs[diff]:'');
-      h='<span class="nm">'+(cl?'👑':'🎵')+' '+esc(r.name)+'<small>'+(r.size/1048576).toFixed(1)+' МБ'+bst+'</small></span>'}
-    d.innerHTML=h+(r.album?'<button class="ad" title="Добавить песню">+ песня</button>':'')+'<button class="x" title="Удалить">🗑</button>';
+      h='<span class="nm">'+(cl?'👑':'🎵')+' '+esc(dispName(r))+'<small>'+(r.size/1048576).toFixed(1)+' МБ'+bst+'</small></span>'}
+    d.innerHTML=h+'<button class="ad" data-a="ren" title="Переименовать">✎</button><button class="x" title="Удалить">🗑</button>';
     d.onclick=()=>r.album?pickAlbum(r.id):pick(r.id);
-    d.querySelector('.x').onclick=async e=>{e.stopPropagation();if(await ask('Удалить из памяти игры: '+r.name+'?'))delRec(r)};
-    if(r.album)d.querySelector('.ad').onclick=e=>{e.stopPropagation();addTo=r.id;$('fileAdd').click()};
+    d.querySelector('.x').onclick=async e=>{e.stopPropagation();if(await ask('Удалить из памяти игры: '+dispName(r)+'?'))delRec(r)};
+    d.querySelector('[data-a="ren"]').onclick=e=>{e.stopPropagation();renameRec(r)};
     el.appendChild(d);
     if(r.album&&r.id===curId){const tl=document.createElement('div');tl.className='trs';tl.onclick=e=>e.stopPropagation();
+      const tb=document.createElement('div');tb.className='tbar';tb.innerHTML='<button data-a="add">＋ Добавить песню</button><button data-a="shuf" class="'+(SHUF[r.id]?'on':'')+'">🔀 Случайно: '+(SHUF[r.id]?'вкл':'выкл')+'</button>';
+      tb.querySelector('[data-a="add"]').onclick=()=>{addTo=r.id;$('fileAdd').click()};
+      tb.querySelector('[data-a="shuf"]').onclick=()=>{SHUF[r.id]=!SHUF[r.id];saveShuf();pickAlbum(r.id)};tl.appendChild(tb);
       r.tracks.forEach((t,i)=>{const row=document.createElement('div');row.innerHTML='<span>'+(i+1)+'. '+esc(t.name.replace(/\.[^.]+$/,''))+'</span><button title="Убрать из альбома">✕</button>';row.querySelector('button').onclick=()=>rmTrack(r,i);tl.appendChild(row)});el.appendChild(tl)}
   })}
+const askText=init=>new Promise(res=>{const i=$('rni');i.value=init||'';$('rn').style.display='flex';setTimeout(()=>{try{i.focus();i.select()}catch(e){}},60);
+  const done=v=>{try{i.blur()}catch(e){}$('rn').style.display='none';setTimeout(()=>{try{window.scrollTo(0,0)}catch(e){}},30);res(v)};$('rny').onclick=()=>done(i.value);$('rnn').onclick=()=>done(null);i.onkeydown=e=>{if(e.key==='Enter')done(i.value)}});
+async function renameRec(r){const key=nameKey(r),v=await askText(r.album?(albLabel[r.id]||''):(NAMES[key]||r.name));if(v===null)return;
+  const t=v.trim().slice(0,40);if(t&&t!==(r.album?'':r.name))NAMES[key]=t;else delete NAMES[key];saveNames();
+  if(curId===r.id){const was=oneLane;oneLane=isSecret(rawName(r));$('fn').textContent=rawName(r)||'Альбом';if(was!==oneLane){r.album?pickAlbum(r.id):pick(r.id);return}}
+  refresh()}
 const ask=msg=>new Promise(res=>{$('cft').textContent=msg;$('cf').style.display='flex';const done=v=>{$('cf').style.display='none';res(v)};$('cfy').onclick=()=>done(true);$('cfn').onclick=()=>done(false)});
 async function delRec(r){await dbDel(r.id);if(curId===r.id){curId=null;curRec=null;buf=null;albFirst=null;token++;$('go').disabled=true;$('st').textContent=''}refresh()}
 async function rmTrack(r,i){
@@ -119,26 +141,29 @@ $('fileAdd').onchange=async e=>{const fl=Array.from(e.target.files).filter(isAud
 async function decodeBlob(blob){try{return await AC.decodeAudioData(await blob.arrayBuffer())}catch(e){return null}}
 async function decodeAnalyze(blob){$('go').disabled=true;$('st').textContent='Декодирую аудио…';buf=null;const b=await decodeBlob(blob);
   if(!b){$('st').textContent='Не удалось прочитать файл 😕';return false}buf=b;await analyze();return true}
-async function pick(id){const r=await dbGet(id);if(!r||r.album)return false;curId=id;curRec=r;albFirst=null;remember(id);$('fn').textContent=r.name;const ok=await decodeAnalyze(r.blob);refresh();return ok}
+async function pick(id){try{return await pick0(id)}catch(e){const m=$('st');if(m)m.textContent='Ошибка: '+(e&&e.message||e);return false}}
+async function pick0(id){const r=await dbGet(id);if(!r||r.album)return false;curId=id;curRec=r;albFirst=null;remember(id);oneLane=isSecret(rawName(r));$('fn').textContent=rawName(r);const ok=await decodeAnalyze(r.blob);refresh();return ok}
 // первая подходящая песня альбома, начиная с from (для фоновой подгрузки следующей)
-async function loadTrack(tracks,from,df,bg){let skips=0;
-  for(let i=from;i<tracks.length;i++){const b=await decodeBlob(tracks[i].blob);
-    if(b){const r=await build(b,df,null,undefined,bg);if(r&&r.P.length>=6)return{idx:i,buf:b,P:r.P,NL:r.NL,skips}}skips++}
+async function loadTrack(tracks,order,from,df,bg){let skips=0;
+  for(let p=from;p<order.length;p++){const i=order[p],b=await decodeBlob(tracks[i].blob);
+    if(b){const r=await build(b,df,null,undefined,bg);if(r&&r.P.length>=6)return{pos:p,idx:i,buf:b,P:r.P,NL:r.NL,skips}}skips++}
   return null}
-async function pickAlbum(id){const r=await dbGet(id);if(!r||!r.album)return false;curId=id;curRec=r;albFirst=null;remember(id);$('fn').textContent=r.name;$('go').disabled=true;
+async function pickAlbum(id){try{return await pickAlbum0(id)}catch(e){const m=$('st');if(m)m.textContent='Ошибка: '+(e&&e.message||e);return false}}
+async function pickAlbum0(id){const r=await dbGet(id);if(!r||!r.album)return false;curId=id;curRec=r;albFirst=null;remember(id);albLabel=mkLabels((await dbAll())||[]);oneLane=isSecret(rawName(r));$('fn').textContent=dispName(r);$('go').disabled=true;
   const my=++token;let skips=0;$('st').textContent='Декодирую аудио…';
-  for(let i=0;i<r.tracks.length;i++){const b=await decodeBlob(r.tracks[i].blob);if(my!==token)return false;
+  const n=r.tracks.length,ord0=SHUF[id]?shuffle([...Array(n).keys()]):[...Array(n).keys()];
+  for(let k=0;k<n;k++){const i=ord0[k],b=await decodeBlob(r.tracks[i].blob);if(my!==token)return false;skips=k;
     if(b){const nm=r.tracks[i].name.replace(/\.[^.]+$/,'').slice(0,24),res=await build(b,diff,pr=>{$('st').textContent='Анализирую: '+nm+' '+Math.round(pr*100)+'%'},my);if(!res)return false;
-      if(res.P.length>=6){buf=b;P=res.P;NL=res.NL;albFirst={idx:i,buf:b,P,NL,skips};$('st').textContent='';$('go').disabled=false;refresh();return true}}
+      if(res.P.length>=6){buf=b;P=res.P;NL=res.NL;albFirst={idx:i,buf:b,P,NL,skips,rest:ord0.slice(k+1)};$('st').textContent='';$('go').disabled=false;refresh();return true}}
     skips++}
   $('st').textContent='В альбоме нет подходящих песен 🤔';refresh();return false}
 async function load(files){
   const fl=(files||[]).filter(isAud);
   if(!fl.length){$('st').textContent='Нужен аудиофайл';return}
   if(amode){const all=(await dbAll())||[],n=all.filter(r=>r.album).length+1;
-    const id=await dbPut({album:true,name:'Альбом '+n,added:Date.now(),tracks:fl.map(f=>({name:f.name,size:f.size,blob:f})),best:{}});
+    const id=await dbPut({album:true,name:'',added:Date.now(),tracks:fl.map(f=>({name:f.name,size:f.size,blob:f})),best:{}});
     if(id==null){$('st').textContent='Не удалось сохранить альбом';return}
-    await pickAlbum(id);return}
+    await refresh();await pickAlbum(id);return}
   const L=(await dbAll())||[];let first=null,firstNew=false;
   for(let i=0;i<fl.length;i++){const f=fl[i],ex=L.find(r=>!r.album&&r.name===f.name&&r.size===f.size);let id;
     if(ex)id=ex.id;else{id=await dbPut({name:f.name,size:f.size,blob:f,added:Date.now()-i,best:{}});if(first===null)firstNew=true}
@@ -158,7 +183,7 @@ function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j
  for(let l=2;l<=n;l<<=1){const a=-2*Math.PI/l,wr=Math.cos(a),wi=Math.sin(a);for(let i=0;i<n;i+=l){let cr=1,ci=0;for(let k=0;k<l/2;k++){const u=i+k,v=u+l/2,xr=re[v]*cr-im[v]*ci,xi=re[v]*ci+im[v]*cr;re[v]=re[u]-xr;im[v]=im[u]-xi;re[u]+=xr;im[u]+=xi;const t=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=t}}}}
 let token=0;
 async function build(bf,df,prog,my,bg){
-  const NLb=[2,3,5,7][df];
+  const NLb=oneLane?1:[2,3,5,7][df];
   const N=1024,HOP=512,sr=bf.sampleRate,ch0=bf.getChannelData(0),ch1=bf.numberOfChannels>1?bf.getChannelData(1):ch0;
   const frames=Math.floor((ch0.length-N)/HOP),flux=new Float32Array(frames),cen=new Float32Array(frames),CH=new Float32Array(frames*12),PC=new Int8Array(N/2);
   for(let k=7;k<120;k++)PC[k]=((Math.round(12*Math.log2(k*sr/N/440))+69)%12+12)%12;
@@ -201,9 +226,12 @@ async function build(bf,df,prog,my,bg){
   const ST=it=>it.s?it.s.t0:it.p.t,items=T.map(p=>({p})).concat(SG.map(q=>({s:q}))).sort((a,b)=>ST(a)-ST(b));
   const PP=[{t:0,lane:(NLb-1)/2,ts:-6,te:.35,res:'pad'}];let pl=Math.round((NLb-1)/2);
   items.forEach((it,i)=>{const last=PP[PP.length-1],dt=ST(it)-(last.dep||last.t);
-    if(it.s){let sd=Math.floor(it.s.t0*1000)%2147483647||1;const rnd=()=>(sd=sd*16807%2147483647)/2147483647,bp=[.9,.7,.55,.5][df];
-      let ln=pl,dir=rnd()>.5?1:-1,tt=it.s.t0;const path=[{t:tt,lane:ln}];
-      while(tt<it.s.t1-.05){tt=Math.min(it.s.t1,tt+bp);let nl=ln+dir*(NLb>=5&&rnd()<.3?2:1);if(nl<0||nl>NLb-1){dir=-dir;nl=ln+dir}nl=Math.max(0,Math.min(NLb-1,nl));path.push({t:tt,lane:nl});ln=nl;if(rnd()<.35)dir=-dir}
+    if(it.s){let sd=Math.floor(it.s.t0*1000)%2147483647||1;const rnd=()=>(sd=sd*16807%2147483647)/2147483647,bp=[1.7,1.4,1.2,1.1][df];
+      // плавный изгиб: не дальше одной дорожки от начала, участки подлиннее, часть ровных
+      let ln=pl,dir=rnd()>.5?1:-1,tt=it.s.t0;const l0=ln,path=[{t:tt,lane:ln}];
+      while(tt<it.s.t1-.05){const seg=Math.min(it.s.t1,tt+bp)-tt;tt+=seg;let nl=ln;
+        if(seg>=bp*.6&&rnd()<.7){nl=ln+dir;if(nl<l0-1||nl>l0+1||nl<0||nl>NLb-1){dir=-dir;nl=ln+dir}nl=Math.max(0,Math.min(NLb-1,Math.max(l0-1,Math.min(l0+1,nl))))}
+        path.push({t:tt,lane:nl});ln=nl;if(rnd()<.5)dir=-dir}
       PP.push({t:it.s.t0,lane:path[0].lane,ts:it.s.t0-.05,te:it.s.t1,dep:it.s.t1,long:true,path,res:null});pl=ln;return}
     const p=it.p,r=cs.indexOf(p.c)/Math.max(1,cs.length-1);let ln=Math.min(NLb-1,Math.floor(r*NLb));
     const ms=Math.max(0,Math.floor((dt-.05)/.17));if(Math.abs(ln-pl)>ms)ln=pl+Math.sign(ln-pl)*ms;
@@ -215,14 +243,14 @@ async function analyze(){const my=++token;$('go').disabled=true;
   const r=await build(buf,diff,pr=>{$('st').textContent='Анализирую ритм… '+Math.round(pr*100)+'%'},my);if(!r)return;
   P=r.P;NL=r.NL;$('st').textContent='';$('go').disabled=P.length<6;if(P.length<6)$('st').textContent='Слишком мало ударов в треке 🤔'}
 
-$('go').onclick=start;
+$('go').onclick=()=>{try{start()}catch(e){const m=$('st');if(m)m.textContent='Ошибка запуска: '+(e&&e.message||e)}};
 const fmt=t=>{t=Math.max(0,Math.floor(t));return Math.floor(t/60)+':'+String(t%60).padStart(2,'0')};
 let lastT=0,startAt=0,ci=0,lives=3,target=1,px=1,missT=-9,pulse=0,pops=[],flash=0,hits=0,perf=0,cur=[39,232,255];
 function start(fresh){
   AC.resume();if(src)try{src.stop()}catch(e){}if(alb&&alb.src2)try{alb.src2.stop()}catch(e){}
   const isAlb=!!(curRec&&curRec.album&&albFirst);
   if(fresh!==false){spd=1;score=maxCombo=0;crowned=!isAlb&&!!(curRec&&curRec.clears&&curRec.clears[diff])}else spd=Math.min(3,+(spd+.1).toFixed(2));
-  if(isAlb){buf=albFirst.buf;P=albFirst.P;NL=albFirst.NL;alb={tracks:curRec.tracks,idx:albFirst.idx,passed:0,total:curRec.tracks.length-albFirst.skips,pre:null,nextAt:null,src2:null,loading:false}}else alb=null;
+  if(isAlb){buf=albFirst.buf;P=albFirst.P;NL=albFirst.NL;alb={tracks:curRec.tracks,idx:albFirst.idx,pos:0,order:[albFirst.idx].concat(SHUF[curRec.id]?shuffle(albFirst.rest):albFirst.rest),passed:0,total:curRec.tracks.length-albFirst.skips,pre:null,nextAt:null,src2:null,loading:false}}else alb=null;
   P.forEach((p,i)=>{p.res=i?null:'pad'});combo=0;lives=3;lastU=null;padDone=false;padFallT=null;target=px=(NL-1)/2;perf=0;ci=0;missT=-9;pops=[];hits=0;missTot=0;
   src=AC.createBufferSource();src.buffer=buf;an=AC.createAnalyser();an.fftSize=128;fd=new Uint8Array(64);
   src.connect(an);an.connect(gain);src.playbackRate.value=spd;startAt=AC.currentTime+(fresh!==false?3:2)/spd;src.start(startAt);
@@ -231,14 +259,14 @@ function start(fresh){
 }
 async function preloadNext(){
   const a=alb;if(!a||a.loading||a.pre!==null)return;
-  const from=a.idx+1;if(from>=a.tracks.length){a.pre=false;return}
-  a.loading=true;let r=null;try{r=await loadTrack(a.tracks,from,diff,true)}catch(e){}
+  const from=a.pos+1;if(from>=a.order.length){a.pre=false;return}
+  a.loading=true;let r=null;try{r=await loadTrack(a.tracks,a.order,from,diff,true)}catch(e){}
   if(alb!==a)return;a.loading=false;a.pre=r||false;if(!r)a.total=a.passed+1}
 function schedNext(){const a=alb,p=a.pre,endAt=startAt+buf.duration/spd;a.nextAt=Math.max(endAt,AC.currentTime+.05);
   const sr=AC.createBufferSource();sr.buffer=p.buf;sr.connect(an);sr.start(a.nextAt);a.src2=sr}
-function switchTrack(){const a=alb,p=a.pre;a.passed++;a.total-=p.skips;a.idx=p.idx;
+function switchTrack(){const a=alb,p=a.pre;a.passed++;a.total-=p.skips;a.idx=p.idx;a.pos=p.pos;
   try{src.stop()}catch(e){}src=a.src2;startAt=a.nextAt;buf=p.buf;P=p.P;NL=p.NL;P[0].lane=Math.max(0,Math.min(NL-1,px));
-  ci=0;lives=3;padDone=true;padFallT=null;lastU=null;a.pre=null;a.nextAt=null;a.src2=null;
+  ci=0;lives=3;padDone=true;padFallT=null;lastU=null;a.pre=null;a.nextAt=null;a.src2=null;pops=[];missT=-9;
   bannerTxt='Песня '+(a.passed+1)+' из '+a.total;accelUntil=performance.now()+2300;pulse=1;preloadNext()}
 function finish(win){
   if(state!=='play')return;
@@ -258,7 +286,7 @@ addEventListener('keydown',e=>{keys[e.code]=1});addEventListener('keyup',e=>{key
 cv.addEventListener('pointerdown',e=>{e.preventDefault();if(state==='play'&&e.clientX>W-80&&e.clientY<80){pause();return}drag=e.clientX;try{cv.setPointerCapture(e.pointerId)}catch(_){}});
 cv.addEventListener('pointermove',e=>{if(drag===null||state!=='play')return;target+=(e.clientX-drag)/LW*1.25;target=Math.max(0,Math.min(NL-1,target));drag=e.clientX});
 ['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,()=>{drag=null}));
-document.addEventListener('touchmove',e=>{if(!(e.target.closest&&e.target.closest('#ui,#pz')))e.preventDefault()},{passive:false});
+document.addEventListener('touchmove',e=>{if(!(e.target.closest&&e.target.closest('#ui,#pz,#rn,#cf')))e.preventDefault()},{passive:false});
 let pNow=0;
 function pause(){if(state!=='play')return;pNow=(AC.currentTime-startAt)*spd;state='pause';drag=null;AC.suspend();$('pz').style.display='flex'}
 function unpause(){if(state!=='pause')return;$('pz').style.display='none';AC.resume();state='play'}
@@ -308,11 +336,12 @@ function loop(ts){
   if(state==='play'&&alb){if(alb.pre&&alb.nextAt===null)schedNext();if(alb.nextAt!==null&&AC.currentTime>=alb.nextAt)switchTrack()}
   const now=state==='play'?(AC.currentTime-startAt)*spd:state==='pause'?pNow:0;
   if(state==='play'){lastT=now;const k=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0);target=Math.max(0,Math.min(NL-1,target+k*3.2*dt));px+=(target-px)*(1-Math.exp(-16*dt));update(now)}
-  CX=W/2;HY=H*.36;GY=H*.78;LW=Math.min(W*.8/(NL+.5),H*.4);pulse*=.9;flash*=.9;const tg=tierCol(combo,performance.now()/1000);for(let i=0;i<3;i++)cur[i]+=(tg[i]-cur[i])*.2;const cs0='rgb('+cur.map(Math.round)+')';
+  CX=W/2;HY=H*.36;GY=H*.78;LW=Math.min(W*.8/((oneLane?3:NL)+.5),H*.4);pulse*=.9;flash*=.9;const tg=tierCol(combo,performance.now()/1000);for(let i=0;i<3;i++)cur[i]+=(tg[i]-cur[i])*.2;const cs0='rgb('+cur.map(Math.round)+')';fx=combo>=2000?2:combo>=1000?1:0;if(fx>fxPrev){flashW=1;pulse=1}fxPrev=fx;
   const sky=g.createLinearGradient(0,0,0,HY);sky.addColorStop(0,'#0b0620');sky.addColorStop(.7,'#3a0f5c');sky.addColorStop(1,'#ff3d7f');
   g.fillStyle=sky;g.fillRect(0,0,W,HY);g.fillStyle='#0a0718';g.fillRect(0,HY,W,H-HY);
   const sr=H*(.14+pulse*.03),sg=g.createLinearGradient(0,HY-sr,0,HY);sg.addColorStop(0,'#ffb03a');sg.addColorStop(1,'#ff3d7f');
   g.save();g.beginPath();g.rect(0,0,W,HY);g.clip();g.fillStyle=sg;g.beginPath();g.arc(CX,HY,sr,0,7);g.fill();g.restore();
+  if(fx){g.fillStyle='hsla('+Math.round((performance.now()/25)%360)+',100%,60%,'+(fx===2?.14:.07)+')';g.fillRect(0,0,W,HY)}
   if(an){an.getByteFrequencyData(fd);const bw=W/64;for(let i=0;i<64;i++){const h=fd[i]/255*H*.12;g.fillStyle='hsla('+(190+i*2.5)+',90%,60%,.35)';g.fillRect(i*bw,HY-h,bw-2,h)}}
   // floor grid in the void
   const off=(now*SPEED)%12;g.lineWidth=1;
@@ -322,23 +351,29 @@ function loop(ts){
     const drawT=p=>{
       const d0=(p.ts-now)*SPEED,d1=(p.te-now)*SPEED;if(d0>DRAW_D||d1<-30)return;
       const lc=p.lane-(NL-1)/2,x0=lc-.42,x1=lc+.42,fade=Math.min(1,(DRAW_D-d0)/60);
-      const col=p.res==='miss'?'#4a4a5a':cs0,nxt=p===P[ci+1];
-      g.globalAlpha=fade*(p.res==='miss'?.5:1);g.shadowColor=cs0;g.shadowBlur=14+(nxt?20:0);
+      const hueC=fx===2?'hsl('+Math.round((((d0*.8+now*140)%360)+360)%360)+',100%,60%)':cs0,col=p.res==='miss'?'#4a4a5a':hueC,nxt=p===P[ci+1];
+      const wv=d=>fx?Math.sin(d*.11+now*4+p.t)*(fx===2?.38:.22)*Math.max(0,Math.min(1,(d-6)/26)):0,wb=wv((d0+d1)/2);
+      g.globalAlpha=fade*(p.res==='miss'?.5:1);g.shadowColor=hueC;g.shadowBlur=14+(nxt?20:0);
       if(p.long){const n=Math.max(2,Math.ceil((p.te-p.ts)/.06));
-        for(let i=0;i<n;i++){const ta=p.ts+(p.te-p.ts)*i/n,tb=p.ts+(p.te-p.ts)*(i+1)/n,da=(ta-now)*SPEED,db=(tb-now)*SPEED;if(db<-30||da>DRAW_D)continue;const la=laneAt(p,ta)-(NL-1)/2,lb=laneAt(p,tb)-(NL-1)/2;poly([Q(la-.42,da,0),Q(la+.42,da,0),Q(lb+.42,db,0),Q(lb-.42,db,0)],col,col,1)}
-        g.shadowBlur=0;g.strokeStyle='rgba(255,255,255,.6)';g.lineWidth=2;g.beginPath();let st=false;for(let i=0;i<=n;i++){const ta=p.ts+(p.te-p.ts)*i/n,da=(ta-now)*SPEED;if(da<-30||da>DRAW_D)continue;const q=Q(laneAt(p,ta)-(NL-1)/2,da,.02);if(!st){g.moveTo(q[0],q[1]);st=true}else g.lineTo(q[0],q[1])}g.stroke();g.globalAlpha=1;return}
-      poly([Q(x0,d0,0),Q(x1,d0,0),Q(x1,d0,-.4),Q(x0,d0,-.4)],'#00000055');
-      poly([Q(x0,d0,0),Q(x1,d0,0),Q(x1,d1,0),Q(x0,d1,0)],col,nxt?'#fff':null,3);
-      g.shadowBlur=0;if(p.res!=='pad'&&p.res!=='miss'){const dm=(d0+d1)/2,hd=(d1-d0)*.32;poly([Q(lc,dm-hd,.02),Q(lc+.15,dm,.02),Q(lc,dm+hd,.02),Q(lc-.15,dm,.02)],'rgba(255,255,255,.92)')}g.globalAlpha=1};
+        for(let i=0;i<n;i++){const ta=p.ts+(p.te-p.ts)*i/n,tb=p.ts+(p.te-p.ts)*(i+1)/n,da=(ta-now)*SPEED,db=(tb-now)*SPEED;if(db<-30||da>DRAW_D)continue;const la=laneAt(p,ta)-(NL-1)/2,lb=laneAt(p,tb)-(NL-1)/2;{const ca=fx===2&&p.res!=='miss'?'hsl('+Math.round((((da*.8+now*140)%360)+360)%360)+',100%,60%)':col,wa=wv(da),wq=wv(db);poly([Q(la-.42,da,wa),Q(la+.42,da,wa),Q(lb+.42,db,wq),Q(lb-.42,db,wq)],ca,ca,1)}}
+        g.shadowBlur=0;g.strokeStyle='rgba(255,255,255,.6)';g.lineWidth=2;g.beginPath();let st=false;for(let i=0;i<=n;i++){const ta=p.ts+(p.te-p.ts)*i/n,da=(ta-now)*SPEED;if(da<-30||da>DRAW_D)continue;const q=Q(laneAt(p,ta)-(NL-1)/2,da,.02+wv(da));if(!st){g.moveTo(q[0],q[1]);st=true}else g.lineTo(q[0],q[1])}g.stroke();g.globalAlpha=1;return}
+      poly([Q(x0,d0,wb),Q(x1,d0,wb),Q(x1,d0,wb-.4),Q(x0,d0,wb-.4)],'#00000055');
+      poly([Q(x0,d0,wb),Q(x1,d0,wb),Q(x1,d1,wb),Q(x0,d1,wb)],col,nxt?'#fff':null,3);
+      g.shadowBlur=0;if(p.res!=='pad'&&p.res!=='miss'){const dm=(d0+d1)/2,hd=(d1-d0)*.32;poly([Q(lc,dm-hd,.02+wb),Q(lc+.15,dm,.02+wb),Q(lc,dm+hd,.02+wb),Q(lc-.15,dm,.02+wb)],'rgba(255,255,255,.92)');
+        if(fx){g.globalAlpha=fade*.17;poly([Q(lc-.34,dm,wb),Q(lc+.34,dm,wb),Q(lc,dm,3.2+wb+Math.sin(now*6+p.t)*.3)],hueC);
+          if(fx===2&&d0<90)for(let k=0;k<3;k++){const rr=Math.abs(Math.sin(p.t*91.7+k*12.9)),ph=(now*.9+rr+k*.33)%1,q=Q(lc+(rr-.5)*1.2,dm,.3+ph*2.2+wb);g.globalAlpha=fade*(1-ph)*.9;g.fillStyle='#fff';g.beginPath();g.arc(q[0],q[1],1.5+3*q[2],0,7);g.fill()}}}g.globalAlpha=1};
     const ahead=P.filter(p=>(p.te-now)*SPEED>=0).reverse(),behind=P.filter(p=>(p.te-now)*SPEED<0&&(p.te-now)*SPEED>-40);
     ahead.forEach(drawT);
     const y=ballY(now),c=Q(px-(NL-1)/2,0,y+.4),r=.3*LW;
     g.fillStyle='rgba(0,0,0,.4)';const gr0=Q(px-(NL-1)/2,0,0);g.beginPath();g.ellipse(gr0[0],gr0[1],r,r*.35,0,0,7);g.fill();
     g.shadowColor=cs0;g.shadowBlur=22;const bg=g.createRadialGradient(c[0]-r*.3,c[1]-r*.4,r*.1,c[0],c[1],r);bg.addColorStop(0,'#fff');bg.addColorStop(1,'#ffb03a');g.fillStyle=bg;g.beginPath();g.arc(c[0],c[1],r,0,7);g.fill();g.shadowBlur=0;
-    behind.forEach(drawT);
-    pops=pops.filter(o=>now-o.t<.6);for(const o of pops){g.globalAlpha=1-(now-o.t)/.6;txt(o.s,CX,H*.25-(now-o.t)*50,34,o.c)}g.globalAlpha=1;
+    pops=pops.filter(o=>now-o.t<.6&&now-o.t>-.1);for(const o of pops){g.globalAlpha=1-(now-o.t)/.6;txt(o.s,CX,H*.25-(now-o.t)*50,34,o.c)}g.globalAlpha=1;
     if(flash>.02){g.fillStyle='rgba(255,47,69,'+(flash*.3).toFixed(2)+')';g.fillRect(0,0,W,H)}
-    txt(String(score),18,34,28,'#f2f0ff','left');txt('♥'.repeat(Math.max(0,lives)),18,66,22,'#ff4466','left');if(alb)txt('💿 '+(alb.passed+1)+'/'+alb.total,18,96,16,'#f2f0ff','left');
+    if(flashW>.02){g.fillStyle='rgba(255,255,255,'+(flashW*.45).toFixed(2)+')';g.fillRect(0,0,W,H);flashW*=.9}
+    {const ctrS=now>=0?Math.min(100,Math.floor(now/buf.duration*100))+'%  ·  '+fmt(now)+' / '+fmt(buf.duration):'';
+      g.font='italic 900 20px "Arial Black",Impact,sans-serif';const wc=ctrS?g.measureText(ctrS).width:0,sstr=String(score);
+      g.font='italic 900 28px "Arial Black",Impact,sans-serif';const ws=g.measureText(sstr).width,av=CX-wc/2-12-18;let ssz=28;if(ws>av)ssz=Math.max(12,Math.floor(28*av/ws));
+      txt(sstr,18,34,ssz,'#f2f0ff','left')}txt('♥'.repeat(Math.max(0,lives)),18,66,22,'#ff4466','left');if(alb)txt('💿 '+(alb.passed+1)+'/'+alb.total,18,96,16,'#f2f0ff','left');
     if(performance.now()<accelUntil){g.globalAlpha=Math.min(1,(accelUntil-performance.now())/600);txt(bannerTxt,CX,H*.4,Math.min(54,W*.09),'#ffe14d');g.globalAlpha=1}
     {const bx=W-38,by=36;g.fillStyle='rgba(255,255,255,.16)';g.beginPath();g.arc(bx,by,22,0,7);g.fill();g.fillStyle='#fff';g.fillRect(bx-8,by-9,5,18);g.fillRect(bx+3,by-9,5,18)}
     if(combo>1)txt(String(combo),CX,60,22,cs0);
@@ -347,6 +382,8 @@ function loop(ts){
     if(now<0)txt(String(Math.ceil(-now)),CX,H*.2,70,'#fff');
   }
 }
+addEventListener('error',e=>{const m=$('st');if(m&&state==='menu')m.textContent='Ошибка: '+(e.message||'')});
+addEventListener('unhandledrejection',e=>{const m=$('st');if(m&&state==='menu')m.textContent='Ошибка: '+((e.reason&&e.reason.message)||e.reason)});
 requestAnimationFrame(loop);
 (async()=>{try{if(sessionStorage.getItem('bh_resume')){sessionStorage.removeItem('bh_resume');const id=+localStorage.getItem('bh_last');if(id){const r=await dbGet(id);if(r){if(!!r.album!==amode)setMode(!!r.album);r.album?pickAlbum(id):pick(id)}}}}catch(e){}})();
 if('serviceWorker' in navigator&&location.protocol.indexOf('http')===0)navigator.serviceWorker.register('sw.js').catch(()=>{});
